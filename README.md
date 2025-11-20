@@ -53,7 +53,7 @@ account/                            # 配置文件目录（父目录下）
 
 #### 1. 安装依赖
 ```bash
-python3 -m venv .venv                                                                                                                                                              1 ↵
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r export_wiznotes/requirements.txt
 ```
