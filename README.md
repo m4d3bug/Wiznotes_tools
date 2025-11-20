@@ -55,7 +55,7 @@ account/                            # 配置文件目录（父目录下）
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r export_wiznotes/requirements.txt
+python3 -m pip install -r export_wiznotes/requirements.txt
 ```
 
 #### 2. 配置账号信息
