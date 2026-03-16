@@ -10,6 +10,7 @@ import re
 import requests
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import markdownify
 from tqdm import tqdm
 
@@ -125,17 +126,21 @@ class NoteExporter:
                         if resources:
                             note_assets_dir.mkdir(exist_ok=True)
 
-                            for resource in resources:
+                            def _download_one(resource):
                                 resource_name = resource.get('name')
                                 if not resource_name:
-                                    continue
-
+                                    return None
                                 resource_path = note_assets_dir / resource_name
-                                if self.client.download_resource(doc_guid, resource, resource_path):
-                                    # 替换HTML中的资源链接为相对路径
-                                    old_url = f"index_files/{resource_name}"
-                                    new_path = f'{note_assets_dir.name}/{resource_name}'
-                                    html_content = html_content.replace(old_url, new_path)
+                                ok = self.client.download_resource(doc_guid, resource, resource_path)
+                                if ok:
+                                    return (f"index_files/{resource_name}",
+                                            f'{note_assets_dir.name}/{resource_name}')
+                                return None
+
+                            with ThreadPoolExecutor(max_workers=16) as pool:
+                                for replacement in pool.map(_download_one, resources):
+                                    if replacement:
+                                        html_content = html_content.replace(*replacement)
 
                         # 处理附件
                         attachments = self.client.get_note_attachments(doc_guid)
