@@ -11,6 +11,7 @@ import requests
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 import markdownify
 from tqdm import tqdm
 
@@ -72,36 +73,31 @@ class NoteExporter:
             exported_count = 0
             logging.info(f"共获取到 {total_notes} 篇笔记")
 
-            # 使用tqdm显示进度
-            for note in tqdm(note_list, desc="导出笔记", unit="篇"):
-                try:
-                    doc_guid = note['docGuid']
-                    note_title = note.get('title', 'Untitled')
+            # 线程安全锁（保护 exported_guids 和 checkpoint）
+            guid_lock = Lock()
 
-                    # 检查是否已导出
+            def export_one(note):
+                doc_guid = note['docGuid']
+                note_title = note.get('title', 'Untitled')
+
+                # 检查是否已导出（加锁读）
+                with guid_lock:
                     skip_export = False
                     if doc_guid in exported_guids:
-                        # 如果启用了重新导出包含"."的文件名，且文件名包含"."，则不跳过
                         if reexport_dot_files and '.' in note_title:
-                            # 检查"."是否为真正的文件扩展名
                             if note_title.lower().endswith(('.md', '.txt', '.html', '.htm')):
-                                # 如果以常见扩展名结尾，跳过（已经是真正的扩展名）
                                 skip_export = True
                             else:
-                                # 包含"."但不是真正的扩展名，强制重新导出
                                 logging.info(f"强制重新导出包含'.'的笔记: 《{note_title}》")
-                                skip_export = False
-
-                                # 清理可能存在的旧的截断文件
                                 self._cleanup_old_truncated_files(current_path, note_title)
                         else:
                             skip_export = True
 
-                    if skip_export:
-                        logging.debug(f"跳过已导出的笔记: 《{note_title}》")
-                        exported_count += 1
-                        continue
+                if skip_export:
+                    logging.debug(f"跳过已导出的笔记: 《{note_title}》")
+                    return True  # 算作已完成
 
+                try:
                     logging.info(f"\n开始下载笔记:《{note_title}》")
                     note_content = self.client.download_note(doc_guid)
 
@@ -228,21 +224,27 @@ class NoteExporter:
                         with open(md_path, 'w', encoding='utf-8') as f:
                             f.write(md_content)
 
-                    # 更新导出状态
-                    exported_guids.add(doc_guid)
-                    exported_count += 1
-                    logging.info(f"导出笔记成功: 《{note_title}》\n")
+                    # 更新导出状态（加锁写）
+                    with guid_lock:
+                        exported_guids.add(doc_guid)
+                        nonlocal exported_count
+                        exported_count += 1
+                        logging.info(f"导出笔记成功: 《{note_title}》\n")
+                        if exported_count % 10 == 0:
+                            self._save_checkpoint(checkpoint_file, exported_guids)
 
-                    # 每导出10篇笔记保存一次断点
-                    if exported_count % 10 == 0:
-                        self._save_checkpoint(checkpoint_file, exported_guids)
-
-                    # 添加延时避免请求过快
-                    time.sleep(0.5)
+                    return True
 
                 except Exception as e:
                     logging.error(f"导出笔记 《{note_title}》 失败: {e}")
-                    continue
+                    return False
+
+            # 4个工人并发，每人内部16线程并发下图
+            with tqdm(total=total_notes, desc="导出笔记", unit="篇") as pbar:
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = {pool.submit(export_one, note): note for note in note_list}
+                    for future in as_completed(futures):
+                        pbar.update(1)
 
             # 导出完成后保存最终断点
             self._save_checkpoint(checkpoint_file, exported_guids)
