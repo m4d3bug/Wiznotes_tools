@@ -239,9 +239,9 @@ class NoteExporter:
                     logging.error(f"导出笔记 《{note_title}》 失败: {e}")
                     return False
 
-            # 4个工人并发，每人内部16线程并发下图
+            # 8个工人并发，每人内部16线程并发下图
             with tqdm(total=total_notes, desc="导出笔记", unit="篇") as pbar:
-                with ThreadPoolExecutor(max_workers=4) as pool:
+                with ThreadPoolExecutor(max_workers=8) as pool:
                     futures = {pool.submit(export_one, note): note for note in note_list}
                     for future in as_completed(futures):
                         pbar.update(1)
