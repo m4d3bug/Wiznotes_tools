@@ -174,7 +174,8 @@ class WizNoteClient:
                   "?downloadInfo=1&downloadData=1")
             response = requests.get(
                 url,
-                headers={'X-Wiz-Token': self.token}
+                headers={'X-Wiz-Token': self.token},
+                timeout=60
             )
 
             if response.status_code != 200:
@@ -269,7 +270,7 @@ class WizNoteClient:
                 return False
 
             logging.debug(f"开始下载资源: {url}")
-            response = requests.get(url, headers={'X-Wiz-Token': self.token})
+            response = requests.get(url, headers={'X-Wiz-Token': self.token}, timeout=30)
 
             if response.status_code == 200:
                 # 确保父目录存在

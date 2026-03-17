@@ -133,7 +133,7 @@ class NoteExporter:
                                             f'{note_assets_dir.name}/{resource_name}')
                                 return None
 
-                            with ThreadPoolExecutor(max_workers=16) as pool:
+                            with ThreadPoolExecutor(max_workers=7) as pool:
                                 for replacement in pool.map(_download_one, resources):
                                     if replacement:
                                         html_content = html_content.replace(*replacement)
@@ -239,11 +239,25 @@ class NoteExporter:
                     logging.error(f"导出笔记 《{note_title}》 失败: {e}")
                     return False
 
-            # 8个工人并发，每人内部16线程并发下图
+            def export_with_retry(note, max_retries=3):
+                for attempt in range(1, max_retries + 1):
+                    result = export_one(note)
+                    if result:
+                        return True
+                    logging.warning(f"第{attempt}次失败，重试《{note.get('title','?')}》")
+                logging.error(f"重试{max_retries}次仍失败，跳过《{note.get('title','?')}》")
+                return False
+
+            # 3个工人并发，每人内部7线程并发下图（总21线程）
             with tqdm(total=total_notes, desc="导出笔记", unit="篇") as pbar:
-                with ThreadPoolExecutor(max_workers=8) as pool:
-                    futures = {pool.submit(export_one, note): note for note in note_list}
+                with ThreadPoolExecutor(max_workers=3) as pool:
+                    futures = {pool.submit(export_with_retry, note): note for note in note_list}
                     for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            note = futures[future]
+                            logging.error(f"笔记异常跳过: 《{note.get('title','?')}》: {e}")
                         pbar.update(1)
 
             # 导出完成后保存最终断点
